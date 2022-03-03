@@ -3,32 +3,13 @@
 #include "user/user.h"
 #include "kernel/fs.h"
 
-char* strstr(const char* str1, const char* str2)
-{
-    char* cp = (char*)str1;
-    char *s1, *s2;
-    if (!*str2)
-        return (char*)str1;
-    while (*cp) {
-        s1 = cp;
-        s2 = (char*)str2;
-        while (*s2 && !(*s1 - *s2))
-            s1++, s2++;
-        if (!*s2)
-            return cp;
-
-        cp++;
-    }
-
-    return 0;
-}
-
 void find(char* path, char* name)
 {
     char buf[512], *p;
     int fd;
     struct dirent de;
     struct stat st;
+    char *cur, *next;
 
     if ((fd = open(path, 0)) < 0) {
         fprintf(2, "find: cannot open %s\n", path);
@@ -43,7 +24,11 @@ void find(char* path, char* name)
 
     switch (st.type) {
     case T_FILE:
-        if (strstr(path, name) != 0)
+        cur = path;
+        while ((next = strchr(cur, '/')))
+            cur = next+1;
+
+        if (strcmp(cur, name) == 0)
             printf("%s\n", path);
         break;
 
