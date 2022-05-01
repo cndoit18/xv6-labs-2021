@@ -132,3 +132,17 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+#define PREFP(fp) (*(uint64*)((fp)- 16))
+#define CURRET(fp) (*(uint64*)((fp) - 8))
+
+void
+backtrace(void)
+{
+  uint64 fp = r_fp();
+  uint64 down = PGROUNDDOWN(fp), up = PGROUNDUP(fp);
+  while (fp < up && fp > down){
+    printf("%p\n", CURRET(fp));
+    fp = PREFP(fp);
+  }
+}
