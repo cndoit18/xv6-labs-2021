@@ -23,10 +23,26 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct {
+  struct spinlock lock;
+  uint pagetable[PHYSTOP >> PGSHIFT];
+} kref;
+
+int
+ksbrk(uint64 pa, int n)
+{
+  int key;
+  acquire(&kref.lock);
+  key = (kref.pagetable[pa >> PGSHIFT] += n);
+  release(&kref.lock);
+  return key;
+}
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&kref.lock, "kref");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -35,8 +51,10 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
+    kref.pagetable[(uint64)p >> PGSHIFT] = 1;
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -46,6 +64,9 @@ freerange(void *pa_start, void *pa_end)
 void
 kfree(void *pa)
 {
+  if(ksbrk((uint64)pa, -1) > 0)
+    return;
+
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
@@ -78,5 +99,7 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+  ksbrk((uint64)r, 1);
   return (void*)r;
 }

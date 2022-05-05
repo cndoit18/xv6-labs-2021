@@ -63,8 +63,12 @@ usertrap(void)
     // an interrupt will change sstatus &c registers,
     // so don't enable until done with those registers.
     intr_on();
-
+    
     syscall();
+  } else if(r_scause() == 15 || r_scause() == 13 || r_scause() == 12) {
+    uint64 va = r_stval();
+    if(va >= p->sz || cowalloc(p->pagetable, va) != 0)
+      p->killed = 1;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
