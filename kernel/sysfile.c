@@ -488,7 +488,44 @@ sys_pipe(void)
 uint64
 sys_mmap(void)
 {
-  return -1;
+  uint64 addr;
+  int len, prot, flags, fd, off, idx;
+  struct file *f;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &addr) < 0 || 
+     argint(1, &len) < 0 ||
+     argint(2, &prot) < 0 ||
+     argint(3, &flags) < 0 ||
+     argfd(4, &fd, &f) < 0 ||
+     argint(5, &off) < 0)
+    return -1;
+  
+  filedup(f);
+  acquire(&p->lock);
+
+  if(addr == 0) {
+    addr = p->sz;
+    if(addr + len >= MAXVA)
+      return -1;
+    p->sz = addr + len;
+  }
+  for(idx = 0; idx < NVMA && p->vma[idx].used; idx ++);
+  if(idx == NVMA){
+    release(&p->lock);
+    return -1;
+  }
+  p->vma[idx].used = 1;
+  p->vma[idx].addr = addr;
+  p->vma[idx].len = len;
+  p->vma[idx].prot = prot;
+  p->vma[idx].ofile = f;
+  p->vma[idx].fd = fd;
+  p->vma[idx].flags = flags;
+  p->vma[idx].off = off;
+
+  release(&p->lock);
+  return addr;
 }
 
 uint64
