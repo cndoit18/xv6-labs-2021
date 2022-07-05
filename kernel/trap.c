@@ -33,6 +33,53 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+#define INTERVAL(o,s,l) ((o)>=(s)&&(o)<(l))
+
+static int
+vmaalloc(struct proc *p, uint64 va)
+{
+  struct vma *vm = 0;
+  struct file *vf;
+  struct inode *ip;
+  int perm = PTE_U;
+  char *mem;
+  for(int i = 0; i < NVMA; i ++) {
+    if(p->vma[i].used && INTERVAL(va, p->vma[i].addr, (p->vma[i].addr)+(p->vma[i].len))) {
+      vm = &p->vma[i];
+      break;
+    }
+  }
+  if(vm == 0){
+    return -1;
+  }
+  vf = vm->ofile;
+  ip = vf->ip;
+
+  if((mem = kalloc()) == 0){
+    return -1;
+  }
+  memset(mem, 0, PGSIZE);
+
+#ifdef LAB_MMAP
+  if(vm->prot & PROT_READ) perm |= PTE_R;
+  if(vm->prot & PROT_WRITE) perm |= PTE_W;
+  if(vm->prot & PROT_EXEC) perm |= PTE_X;
+#endif
+
+  ilock(ip);
+  if(readi(ip, 0, (uint64)mem, PGROUNDDOWN(va - vm->addr) + vm->off, PGSIZE) <= 0){
+    kfree(mem);
+    iunlock(ip);
+    return -1;
+  }
+  iunlock(ip);
+  if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, perm) < 0){
+    kfree(mem);
+    return -1;
+  }
+  return 0;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -71,8 +118,12 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else if((r_scause() == 15 || r_scause() == 13) && r_stval() < p->sz) {
-    // mmap
+  } else if(r_scause() == 15 || r_scause() == 13) {
+    if(vmaalloc(p ,r_stval()) < 0){
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
