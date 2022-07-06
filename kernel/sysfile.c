@@ -484,3 +484,95 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  int len, prot, flags, fd, off, idx;
+  struct file *f;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &addr) < 0 || 
+     argint(1, &len) < 0 ||
+     argint(2, &prot) < 0 ||
+     argint(3, &flags) < 0 ||
+     argfd(4, &fd, &f) < 0 ||
+     argint(5, &off) < 0)
+    return -1;
+  
+  filedup(f);
+  acquire(&p->lock);
+
+  if(addr == 0) {
+    addr = p->sz;
+    if(addr + len >= MAXVA)
+      return -1;
+    p->sz = addr + len;
+  }
+  for(idx = 0; idx < NVMA && p->vma[idx].used; idx ++);
+  if(idx == NVMA){
+    release(&p->lock);
+    return -1;
+  }
+#ifdef LAB_MMAP
+  if(!f->readable && prot & PROT_READ && flags & MAP_SHARED) {
+    release(&p->lock);
+    return -1;
+  }
+   if(!f->writable && prot & PROT_WRITE && flags & MAP_SHARED) {
+    release(&p->lock);
+    return -1;
+  }
+#endif
+  p->vma[idx].used = 1;
+  p->vma[idx].addr = addr;
+  p->vma[idx].len = len;
+  p->vma[idx].prot = prot;
+  p->vma[idx].ofile = f;
+  p->vma[idx].fd = fd;
+  p->vma[idx].flags = flags;
+  p->vma[idx].off = off;
+  p->vma[idx].bitmap = ~(-1 << (len/PGSIZE));
+  
+
+  release(&p->lock);
+  return addr;
+}
+
+#define INTERVAL(o,s,l) ((o)>=(s)&&(o)<(l))
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int len;
+  uint64 a;
+  struct vma *vm = 0;
+  if(argaddr(0, &addr) < 0 ||
+     argint(1, &len) < 0)
+    return -1;
+  struct proc *p = myproc();
+   for(int i = 0; i < NVMA; i ++) {
+    if(p->vma[i].used && INTERVAL(addr, p->vma[i].addr, (p->vma[i].addr)+(p->vma[i].len))) {
+      vm = &p->vma[i];
+      break;
+    }
+  }
+
+  if(vm == 0){
+    return -1;
+  }
+#ifdef LAB_MMAP
+  for(a = addr; vm->flags & MAP_SHARED && a < addr + len; a += PGSIZE){
+     filewrite(vm->ofile, a, PGSIZE);
+  }
+#endif
+  uvmunmap(p->pagetable, addr, len/PGSIZE, 1);
+  vm->bitmap &= ~((~(-1 << (len/PGSIZE)))<<((addr - vm->addr)/PGSIZE));
+  if(vm->bitmap == 0){
+    filedup(vm->ofile);
+    vm->used = 0;
+  }
+  return 0;
+}

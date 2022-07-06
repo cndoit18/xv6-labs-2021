@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -140,6 +141,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  memset(&p->vma, 0, sizeof(p->vma));
 
   return p;
 }
@@ -299,6 +302,13 @@ fork(void)
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
+  
+  for(i = 0; i < NVMA; i++){
+    if(p->vma[i].used){
+      filedup(p->vma[i].ofile);
+      np->vma[i] = p->vma[i];
+    }
+  }
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
@@ -343,6 +353,19 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+  // Close all vma
+  for(int idx = 0; idx < NVMA; idx ++){
+    if(p->vma[idx].used){
+      struct vma *vm = &p->vma[idx];
+#ifdef LAB_MMAP
+      for(uint64 a = vm->addr; vm->flags & MAP_SHARED && a < vm->addr + vm->len; a += PGSIZE)
+        filewrite(vm->ofile, a, PGSIZE);
+#endif
+      uvmunmap(p->pagetable, vm->addr, vm->len/PGSIZE, 1);
+    }
+  }
+  memset(&p->vma, 0, sizeof(p->vma));
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
